@@ -284,13 +284,14 @@ static gem_instruction jump_table [] = {
 };
 
 /*---------------------------------------------------------------------------
+ *  Addressing modes for the MOS 6502. 
  *
- *  Addressing modes for the MOS 6502. These affect how the arguments to a
- *  given instruction are retrieved. With the exception of the immediate mode
- *  (which actually returns the argument itself), these functions all return
- *  the memory address of the argument so that it may be fetched by the 
- *  instruction.
+ *  These affect how the arguments to a given instruction are retrieved. With 
+ *  the exception of the immediate mode (which actually returns the argument 
+ *  itself), these functions all return the memory address of the argument so 
+ *  that it may be fetched by the instruction.
  *
+ *  They will also update the Program Counter as required.
  *---------------------------------------------------------------------------*/
 
 /*
@@ -313,65 +314,115 @@ static gem_instruction jump_table [] = {
 static GEM_MEMORY_ADDR
 absolute ( gem_mos *m ) {
     GEM_MEMORY_ADDR addr;    
+    
+    /* an absolute address is 2 bytes wide, so we use gem_mos_mem_readw to read 
+     * a word */
     addr = gem_mos_mem_readw( m, m->pc );
+
+    /* advance the program counter so that it points to the instruction after
+     * the absolute address. The absolute address is 2 bytes wide, so add 2 */
     m->pc += 2;
+
+    /* return the address of the argument */
     return addr;
 }
 
 /*
  * ===  FUNCTION  =============================================================
- *          Name: 
- *  Desecription: 
+ *          Name: absolute_x
+ *  Desecription: This is the x-indexed absolute addressing mode. Its operation
+ *                is similar to the absolute addressing mode except that we
+ *                add the value of the X register and the CARRY_FLAG to the 
+ *                address retrieved from memory.
+ *
+ *                For simplicity, this function simply calls the absolute
+ *                function above and returns the result plus the X register
+ *                plus the current value of teh CARRY_FLAG.
+ *
+ *                This function should incurs an extra time penalty if we cross
+ *                a page boundary when indexing
+ *
+ *                Updating the Program Counter is handled by the absolute
+ *                function
  * ============================================================================
  */
 static GEM_MEMORY_ADDR
 absolute_x ( gem_mos *m ) {
-    /* TODO: Investigate the add without carry for this addressing mode */
-    GEM_MEMORY_ADDR addr;    
-    addr = absolute(m);
-    return addr + m->x;
+    /* TODO: Check for page crossings */
+    return absolute(m) + m->x + gem_mos_sr_test( m, SR_FLAG_CARRY );
 }
 
 /*
  * ===  FUNCTION  =============================================================
- *          Name: 
- *  Desecription: 
+ *          Name: absolute_y
+ *  Desecription: This is the y-indexed absolute addressing mode. Its operation
+ *                is similar to the absolute addressing mode except that we
+ *                add the value of the Y register and the CARRY_FLAG to the
+ *                address retrieved from memory
+ *
+ *                For simplicity, this function simply calls the absolute
+ *                function above and returns the result plus the Y register
+ *                plus the current value of the CARRY_FLAG.
+ *
+ *                This function should incur an extra time penalty if we cross
+ *                a page boundary when indexing
+ *
+ *                Updating the Program Counter is handled by the absolute 
+ *                function
  * ============================================================================
  */
 static GEM_MEMORY_ADDR
 absolute_y ( gem_mos *m ) {
-    /* TODO: Investigate the add with carry for this addressing mode */
-    GEM_MEMORY_ADDR addr;    
-    addr = absolute(m);
-    return addr + m->y;
+    /* TODO: Check for page crossings */
+    return absolute(m) + m->y + gem_mos_sr_test( m, SR_FLAG_CARRY );
 }
 
 /*
  * ===  FUNCTION  =============================================================
- *          Name: 
- *  Desecription: 
+ *          Name: immediate
+ *  Desecription: This is the only addressing mode which returns a value
+ *                rather than an address. When using the immediate addressing
+ *                mode, the byte following the instruction contains the value
+ *                of the argument to the instruction. This value can simply
+ *                be returned and operated on.
+ *
+ *                The program counter is updated as per normal so that it 
+ *                points to the instruction immediately after the argument
  * ============================================================================
  */
 static GEM_MEMORY_BYTE
 immediate ( gem_mos *m ) {
-    GEM_MEMORY_BYTE val;    
-    val = gem_mos_mem_read( m, m->pc++ );
-    return val;
+    return gem_mos_mem_read(m, m->pc++);
 }
 
 /*
  * ===  FUNCTION  =============================================================
- *          Name: 
- *  Desecription: 
+ *          Name: indirect 
+ *  Desecription: This is a somewhat strange addressing mode. The two bytes
+ *                following the instruction contain the address of the address
+ *                of the argument. In other words, we have a pointer to a 
+ *                pointer.
+ *
+ *                For the sake of terminology, the two bytes following the 
+ *                instruction contain the **effective** address. The value 
+ *                pointed to by the effective address is the address of the
+ *                argument.
+ *
+ *                This function uses the absolute addressing mode function
+ *                above to retrieve the effective address. It then uses
+ *                the gem_mos_mem_readw function to retrieve the address of
+ *                the argument based on the effective address.
+ *
+ *                Updating the program counter is handled by the absolute
+ *                function
  * ============================================================================
  */
 static GEM_MEMORY_ADDR
 indirect ( gem_mos *m ) {
-    /* TODO: Check for page crossings */
     GEM_MEMORY_ADDR addr, eaddr;
-    addr = absolute(m); 
-    eaddr = gem_mos_mem_readw( m, addr );
-    return eaddr;
+    eaddr = absolute(m); 
+    addr = gem_mos_mem_readw( m, eaddr );
+    return addr;
 }
 
 /*
@@ -399,15 +450,22 @@ indirect_x ( gem_mos *m ) {
 static GEM_MEMORY_ADDR 
 indirect_y ( gem_mos *m ) {
     GEM_MEMORY_ADDR addr, eaddr;
-    addr = gem_mos_mem_read( m, m->pc++ );  
-    eaddr = gem_mos_mem_readw( m, addr );
-    return eaddr + m->y;
+    eaddr = gem_mos_mem_read( m, m->pc++ );  
+    addr = gem_mos_mem_readw( m, eaddr );
+    return addr + m->y;
 }
 
 /*
  * ===  FUNCTION  =============================================================
- *          Name: 
- *  Desecription: 
+ *          Name: zeropage
+ *  Desecription: The zeropage addressing mode can be used to address the first
+ *                256 bytes of MOS 6502 memory. It is a little faster than
+ *                using the absolute addressing mode because we only need to
+ *                read the low byte of the address from memory. The high byte
+ *                is assumed to be zero.
+ *
+ *                The value returned by this function will be an address 
+ *                somewhere between 0x0000 and 0x00FF
  * ============================================================================
  */
 static GEM_MEMORY_ADDR
@@ -511,7 +569,7 @@ gem_mos_sr_update ( gem_mos *m, GEM_STATUS_FLAG flag, GEM_TEST test ) {
 
 GEM_TEST
 gem_mos_sr_test ( gem_mos *m, GEM_STATUS_FLAG flag ) {
-    return m->sr & flag;
+    return (m->sr & flag) > 0;
 }
 
 GEM_MEMORY_WORD
@@ -547,7 +605,9 @@ gem_mos_load_rom ( gem_mos *m, char *fname ) {
     
     addr = GEM_ROM_ADDR;
     /* TODO: Limit this so that it only reads into valid ROM memory. I'm not
-     * sure how big that will be, but right now this is problematic */  
+     * sure how big that will be, but right now this is problematic. We don't
+     * want to write over our interrupt vectors at the end of memory space,
+     * for example */  
     while(!feof(f)) {
         m->memory[addr++] = getc(f);
     }
