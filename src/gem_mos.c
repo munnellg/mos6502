@@ -1,5 +1,9 @@
 #include "gem_mos.h"
 
+GEM_OPCODE  opcode = 0;
+char disasm[256] = {0};
+
+
 /* TODO: Switch statements are apparently converted to jump tables when 
  * compiled in C. Might be worth swapping this array out for a function call
  * with a big switch. Will remove the risk of hitting NULL array values. Also
@@ -27,7 +31,7 @@ static gem_instruction jump_table [] = {
     gem_mos_asl_abs, /* 0x0E */
     NULL, /* 0x0F */
 
-    NULL, /* 0x10 */
+    gem_mos_bpl_rel, /* 0x10 */
     NULL, /* 0x11 */
     NULL, /* 0x12 */
     NULL, /* 0x13 */
@@ -61,7 +65,7 @@ static gem_instruction jump_table [] = {
     NULL, /* 0x2E */
     NULL, /* 0x2F */
 
-    NULL, /* 0x30 */
+    gem_mos_bmi_rel, /* 0x30 */
     NULL, /* 0x31 */
     NULL, /* 0x32 */
     NULL, /* 0x33 */
@@ -87,15 +91,15 @@ static gem_instruction jump_table [] = {
     NULL, /* 0x46 */
     NULL, /* 0x47 */
     gem_mos_pha_imp, /* 0x48 */
-    NULL, /* 0x49 */
+    gem_mos_eor_imm, /* 0x49 */
     NULL, /* 0x4A */
     NULL, /* 0x4B */
-    NULL, /* 0x4C */
+    gem_mos_jmp_abs, /* 0x4C */
     NULL, /* 0x4D */
     NULL, /* 0x4E */
     NULL, /* 0x4F */
 
-    NULL, /* 0x50 */
+    gem_mos_bvc_rel, /* 0x50 */
     NULL, /* 0x51 */
     NULL, /* 0x52 */
     NULL, /* 0x53 */
@@ -121,7 +125,7 @@ static gem_instruction jump_table [] = {
     NULL, /* 0x66 */
     NULL, /* 0x67 */
     gem_mos_pla_imp, /* 0x68 */
-    NULL, /* 0x69 */
+    gem_mos_adc_imm, /* 0x69 */
     NULL, /* 0x6A */
     NULL, /* 0x6B */
     NULL, /* 0x6C */
@@ -129,7 +133,7 @@ static gem_instruction jump_table [] = {
     NULL, /* 0x6E */
     NULL, /* 0x6F */
 
-    NULL, /* 0x70 */
+    gem_mos_bvs_rel, /* 0x70 */
     NULL, /* 0x71 */
     NULL, /* 0x72 */
     NULL, /* 0x73 */
@@ -163,7 +167,7 @@ static gem_instruction jump_table [] = {
     NULL, /* 0x8E */
     NULL, /* 0x8F */
 
-    NULL, /* 0x90 */
+    gem_mos_bcc_rel, /* 0x90 */
     NULL, /* 0x91 */
     NULL, /* 0x92 */
     NULL, /* 0x93 */
@@ -193,11 +197,11 @@ static gem_instruction jump_table [] = {
     gem_mos_tax_imp, /* 0xAA */
     NULL, /* 0xAB */
     NULL, /* 0xAC */
-    NULL, /* 0xAD */
+    gem_mos_lda_abs, /* 0xAD */
     NULL, /* 0xAE */
     NULL, /* 0xAF */
 
-    NULL, /* 0xB0 */
+    gem_mos_bcs_rel, /* 0xB0 */
     NULL, /* 0xB1 */
     NULL, /* 0xB2 */
     NULL, /* 0xB3 */
@@ -214,7 +218,7 @@ static gem_instruction jump_table [] = {
     NULL, /* 0xBE */
     NULL, /* 0xBF */
 
-    NULL, /* 0xC0 */
+    gem_mos_cpy_imm, /* 0xC0 */
     NULL, /* 0xC1 */
     NULL, /* 0xC2 */
     NULL, /* 0xC3 */
@@ -223,15 +227,15 @@ static gem_instruction jump_table [] = {
     NULL, /* 0xC6 */
     NULL, /* 0xC7 */
     gem_mos_iny_imp, /* 0xC8 */
-    NULL, /* 0xC9 */
+    gem_mos_cmp_imm, /* 0xC9 */
     gem_mos_dex_imp, /* 0xCA */
     NULL, /* 0xCB */
     NULL, /* 0xCC */
-    NULL, /* 0xCD */
+    gem_mos_cmp_abs, /* 0xCD */
     NULL, /* 0xCE */
     NULL, /* 0xCF */
 
-    NULL, /* 0xD0 */
+    gem_mos_bne_rel, /* 0xD0 */
     NULL, /* 0xD1 */
     NULL, /* 0xD2 */
     NULL, /* 0xD3 */
@@ -248,7 +252,7 @@ static gem_instruction jump_table [] = {
     NULL, /* 0xDE */
     NULL, /* 0xDF */
 
-    NULL, /* 0xE0 */
+    gem_mos_cpx_imm, /* 0xE0 */
     NULL, /* 0xE1 */
     NULL, /* 0xE2 */
     NULL, /* 0xE3 */
@@ -265,7 +269,7 @@ static gem_instruction jump_table [] = {
     NULL, /* 0xEE */
     NULL, /* 0xEF */
 
-    NULL, /* 0xF0 */
+    gem_mos_beq_rel, /* 0xF0 */
     NULL, /* 0xF1 */
     NULL, /* 0xF2 */
     NULL, /* 0xF3 */
@@ -503,6 +507,52 @@ zeropage_y ( gem_mos *m ) {
     return (GEM_MEMORY_ADDR) addr;
 }
 
+static GEM_OFFSET
+relative ( gem_mos *m ) {
+    return m->memory[m->pc++];
+}
+
+static void
+add_with_carry ( gem_mos *m, GEM_REGISTER8 *b ) {
+    GEM_REGISTER8 x;
+    /* compute result */
+    x = m->a + *b + gem_mos_sr_test( m, SR_FLAG_CARRY );
+    /* update status registers */
+    gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(x) );
+    gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(x) );  
+    gem_mos_sr_update( m, SR_FLAG_OVERFLOW, GEM_TEST_OVERFLOW( m->a, *b, x ) );
+    gem_mos_sr_update( m, SR_FLAG_CARRY, GEM_TEST_CARRY( m->a, *b, 
+                GEM_REGISTER8_MAX) );  
+    /* move result to accumulator */
+    m->a = x;
+}
+
+static void
+and ( gem_mos *m, GEM_REGISTER8 x ) {
+    m->a &= x;
+    gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->a) );
+    gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->a) );
+}
+
+static void
+branch ( gem_mos *m, GEM_OFFSET o, GEM_TEST condition ) {
+    if(condition) {
+        m->pc += o;
+    }
+}
+
+static void
+compare ( gem_mos *m, GEM_MEMORY_BYTE x, GEM_MEMORY_BYTE y ) {
+    GEM_MEMORY_BYTE result;
+    GEM_MEMORY_BYTE comp;
+    comp = ~y;
+    result = x + (comp+1);
+    gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(result) );                    
+    gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(result) );
+    gem_mos_sr_update( m, SR_FLAG_CARRY, 
+            GEM_TEST_CARRY( comp, 1, GEM_REGISTER8_MAX) ); 
+}
+
 static void
 arithmetic_shift_left ( gem_mos *m, GEM_REGISTER8 *a ) {
     gem_mos_sr_update( m, SR_FLAG_CARRY, GEM_TEST_MSB(*a) );
@@ -512,10 +562,22 @@ arithmetic_shift_left ( gem_mos *m, GEM_REGISTER8 *a ) {
 }
 
 static void
-logical_or ( gem_mos *m, GEM_REGISTER8 *a, GEM_REGISTER8 b ) {
-    *a |= b;
-    gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(*a) );
-    gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(*a) );
+eor ( gem_mos *m, GEM_REGISTER8 x ) {
+    m->a ^= x;
+    gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->a) );
+    gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->a) );
+}
+
+static void
+jump ( gem_mos *m, GEM_MEMORY_ADDR t ) {
+    m->pc = t;
+}
+
+static void
+or ( gem_mos *m, GEM_MEMORY_BYTE b ) {
+    m->a |= b;
+    gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->a) );
+    gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->a) );
 }
 
 static void
@@ -569,7 +631,7 @@ gem_mos_sr_update ( gem_mos *m, GEM_STATUS_FLAG flag, GEM_TEST test ) {
 
 GEM_TEST
 gem_mos_sr_test ( gem_mos *m, GEM_STATUS_FLAG flag ) {
-    return (m->sr & flag) > 0;
+    return (m->sr & flag) != 0;
 }
 
 GEM_MEMORY_WORD
@@ -592,10 +654,13 @@ gem_mos_mem_write ( gem_mos *m, GEM_MEMORY_ADDR addr, GEM_MEMORY_BYTE data ) {
 
 int32_t
 gem_mos_load_rom ( gem_mos *m, char *fname ) {
-    FILE *f;
-    int32_t nbytes;
+    return gem_mos_load_rom_at( m, fname, GEM_ROM_ADDR ); 
+}
 
-    GEM_MEMORY_ADDR addr;
+int32_t
+gem_mos_load_rom_at ( gem_mos *m, char *fname, GEM_MEMORY_ADDR dest ) {
+    FILE *f;
+    int32_t addr;
 
     f = fopen(fname, "r");
 
@@ -603,20 +668,14 @@ gem_mos_load_rom ( gem_mos *m, char *fname ) {
         return -1;
     }
     
-    addr = GEM_ROM_ADDR;
-    /* TODO: Limit this so that it only reads into valid ROM memory. I'm not
-     * sure how big that will be, but right now this is problematic. We don't
-     * want to write over our interrupt vectors at the end of memory space,
-     * for example */  
-    while(!feof(f)) {
+    addr = dest;
+    while(!feof(f) && addr < GEM_MEMORY_CAPACITY ) {
         m->memory[addr++] = getc(f);
     }
 
-    nbytes = ftell(f);
-
     fclose(f);
 
-    return nbytes; 
+    return addr - dest; 
 }
 
 GEM_MEMORY_BYTE
@@ -647,16 +706,55 @@ gem_mos_execute ( gem_mos *m, GEM_OPCODE code ) {
      * responsibility of the developer to make sure invalid code isn't run,
      * but maybe the library should do something to prevent catastropic 
      * failure */
-    return jump_table[code](m); 
+    if( jump_table[code] ) {
+        return jump_table[code](m); 
+    } else {
+        return -1;
+    }
 }
 
 /* fetch and execute next CPU instruction */
-void
+GEM_CLOCK_TICKS
 gem_mos_step ( gem_mos *m ) {
     GEM_OPCODE code;
 
     code = gem_mos_fetch(m, m->pc++);
-    m->clock += gem_mos_execute( m, code );
+    opcode = code;
+    return gem_mos_execute( m, code );
+}
+
+GEM_CLOCK_TICKS
+gem_mos_run_for ( gem_mos *m, GEM_CLOCK_TICKS num_cycles ) {
+    GEM_CLOCK_TICKS executed;
+    int result;
+
+    executed = 0;
+    result = 0;
+
+    while ( executed < num_cycles && result >= 0 ) {
+        if( result >= 0 ) {
+            executed += gem_mos_step(m);
+        }
+    }
+
+    return (result < 0)? -executed : executed;
+}
+
+void
+gem_mos_reset_soft ( gem_mos *m ) {
+    m->pc = m->memory[GEM_VECTOR_RESET+1];
+    m->pc <<= 8;
+    m->pc |= m->memory[GEM_VECTOR_RESET];   
+}
+
+GEM_OPCODE
+gem_get_opcode ( void ) {
+    return opcode;
+}
+
+char*
+gem_get_disasm ( void ) {
+    return disasm;
 }
 
 void
@@ -671,16 +769,26 @@ gem_mos_free ( gem_mos *m ) {
 GEM_CLOCK_TICKS
 gem_mos_ora_xin ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;  
-    ticks = 3;          
-    logical_or(m, &m->a, gem_mos_mem_read( m, indirect_x(m) ));
+    GEM_MEMORY_ADDR addr;
+    GEM_REGISTER8 arg;
+    ticks = 3;        
+    addr = indirect_x(m);
+    arg = gem_mos_mem_read( m, addr );
+    or(m, arg);
+    sprintf(disasm, "ORA ($%02X,X) ; 0x%02X", addr - m->x, arg); 
     return ticks;
 }
 
 GEM_CLOCK_TICKS
 gem_mos_ora_zpg ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;  
+    GEM_MEMORY_ADDR addr;
+    GEM_REGISTER8 arg;
     ticks = 3;      
-    logical_or(m, &m->a, gem_mos_mem_read( m, zeropage(m) ));   
+    addr = zeropage(m);
+    arg = gem_mos_mem_read( m, addr );
+    or( m, arg );
+    sprintf(disasm, "ORA $%02X ; 0x%02X", addr&0xFF, arg);
     return ticks;
 }
 
@@ -688,12 +796,13 @@ GEM_CLOCK_TICKS
 gem_mos_asl_zpg ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     GEM_MEMORY_ADDR addr;
-    GEM_MEMORY_BYTE temp;
+    GEM_MEMORY_BYTE arg;
     ticks = 5;      
     addr = zeropage(m);
-    temp = gem_mos_mem_read( m, addr );
-    arithmetic_shift_left( m, &temp );  
-    gem_mos_mem_write( m, addr, temp );
+    arg = gem_mos_mem_read( m, addr );
+    arithmetic_shift_left( m, &arg );  
+    gem_mos_mem_write( m, addr, arg );
+    sprintf(disasm, "ASL $%02X ; 0x%02X", addr&0xFF, arg);
     return ticks;
 }
 
@@ -702,14 +811,18 @@ gem_mos_php_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 3;
     gem_mos_sp_push( m, m->sr );    
+    sprintf(disasm, "PHP");
     return ticks;
 }
 
 GEM_CLOCK_TICKS
 gem_mos_ora_imm ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
+    GEM_REGISTER8 arg;
     ticks = 3;
-    logical_or(m, &m->a, immediate(m) );
+    arg = immediate(m);
+    or( m, arg );
+    sprintf(disasm, "ORA #$%02X", arg);
     return ticks;
 }
 
@@ -718,14 +831,31 @@ gem_mos_asl_acc ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;          
     arithmetic_shift_left( m, &m->a );  
+    sprintf(disasm, "ASL A");
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_bpl_rel ( gem_mos *m ) {
+    GEM_OFFSET offset;
+    GEM_CLOCK_TICKS ticks;
+    ticks = 2;
+    offset = relative(m);
+    branch( m, offset, !gem_mos_sr_test( m, SR_FLAG_NEGATIVE ) );
+    sprintf(disasm, "BPL $%02X", offset&0xFF ); 
     return ticks;
 }
 
 GEM_CLOCK_TICKS
 gem_mos_ora_abs ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_REGISTER8 arg;
     ticks = 4;
-    logical_or(m, &m->a, gem_mos_mem_read( m, absolute(m) ) );
+    addr = absolute(m);
+    arg = gem_mos_mem_read( m, addr );
+    or( m, arg );
+    sprintf(disasm, "ORA $%04X ; 0x%02X", addr, arg ); 
     return ticks;
 }
 
@@ -733,12 +863,13 @@ GEM_CLOCK_TICKS
 gem_mos_asl_abs ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     GEM_MEMORY_ADDR addr;
-    GEM_MEMORY_BYTE temp;
+    GEM_MEMORY_BYTE arg;
     ticks = 6;      
     addr = absolute(m);
-    temp = gem_mos_mem_read( m, addr );
-    arithmetic_shift_left( m, &temp );  
-    gem_mos_mem_write( m, addr, temp );
+    arg = gem_mos_mem_read( m, addr );
+    arithmetic_shift_left( m, &arg );  
+    gem_mos_mem_write( m, addr, arg );
+    sprintf(disasm, "ASL $%04X ; 0x%02X", addr, arg );
     return ticks;
 }
 
@@ -747,6 +878,7 @@ gem_mos_clc_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     gem_mos_sr_unset( m, SR_FLAG_CARRY );   
+    sprintf(disasm, "CLC" );    
     return ticks;
 }
 
@@ -755,6 +887,18 @@ gem_mos_plp_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 4;
     m->sr = gem_mos_sp_pop( m );    
+    sprintf(disasm, "PLP" );    
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_bmi_rel ( gem_mos *m ) {
+    GEM_OFFSET offset;
+    GEM_CLOCK_TICKS ticks;
+    ticks = 2;
+    offset = relative(m);
+    branch( m, offset, gem_mos_sr_test( m, SR_FLAG_NEGATIVE ) );
+    sprintf(disasm, "BMI $%02X", offset&0xFF ); 
     return ticks;
 }
 
@@ -763,6 +907,7 @@ gem_mos_sec_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     gem_mos_sr_set( m, SR_FLAG_CARRY ); 
+    sprintf(disasm, "SEC" );    
     return ticks;
 }
 
@@ -770,7 +915,41 @@ GEM_CLOCK_TICKS
 gem_mos_pha_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 3;
-    gem_mos_sp_push( m, m->a ); 
+    gem_mos_sp_push( m, m->a );
+    sprintf(disasm, "PHA" );    
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_eor_imm ( gem_mos *m ) {
+    GEM_MEMORY_BYTE arg;
+    GEM_CLOCK_TICKS ticks;
+    ticks = 2;
+    arg = immediate(m);
+    eor( m, arg );
+    sprintf(disasm, "EOR #$%02X", arg);
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_jmp_abs ( gem_mos *m ) {
+    GEM_MEMORY_ADDR arg;
+    GEM_CLOCK_TICKS ticks;    
+    ticks = 3;    
+    arg = absolute(m);
+    jump( m, arg );
+    sprintf(disasm, "JMP $%04X", arg);
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_bvc_rel ( gem_mos *m ) {
+    GEM_OFFSET offset;
+    GEM_CLOCK_TICKS ticks;
+    ticks = 2;
+    offset = relative(m);
+    branch( m, offset, !gem_mos_sr_test( m, SR_FLAG_OVERFLOW ) );
+    sprintf(disasm, "BVC $%02X", offset&0xFF ); 
     return ticks;
 }
 
@@ -779,6 +958,7 @@ gem_mos_cli_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     gem_mos_sr_unset( m, SR_FLAG_INTERRUPT );   
+    sprintf(disasm, "CLI" );    
     return ticks;
 }
 
@@ -786,7 +966,32 @@ GEM_CLOCK_TICKS
 gem_mos_pla_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 4;
-    m->a = gem_mos_sp_pop( m ); 
+    m->a = gem_mos_sp_pop( m );
+    gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->a) );
+    gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->a) );  
+    sprintf(disasm, "PLA" );     
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_adc_imm ( gem_mos *m ) {
+    GEM_MEMORY_BYTE arg;
+    GEM_CLOCK_TICKS ticks;
+    ticks = 2;
+    arg = immediate(m);
+    add_with_carry( m, &arg );
+    sprintf(disasm, "ADC #$%02X", arg);
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_bvs_rel ( gem_mos *m ) {
+    GEM_OFFSET offset;
+    GEM_CLOCK_TICKS ticks;
+    ticks = 2;
+    offset = relative(m);
+    branch( m, offset, gem_mos_sr_test( m, SR_FLAG_OVERFLOW ) );
+    sprintf(disasm, "BVS $%02X", offset&0xFF ); 
     return ticks;
 }
 
@@ -795,6 +1000,7 @@ gem_mos_sei_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     gem_mos_sr_set( m, SR_FLAG_INTERRUPT ); 
+    sprintf(disasm, "SEI" );    
     return ticks;
 }
 
@@ -805,6 +1011,18 @@ gem_mos_dey_imp ( gem_mos *m ) {
     m->y--;
     gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->y) );
     gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->y) );  
+    sprintf(disasm, "DEY" );    
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_bcc_rel ( gem_mos *m ) {
+    GEM_OFFSET offset;
+    GEM_CLOCK_TICKS ticks;
+    ticks = 2;
+    offset = relative(m);
+    branch( m, offset, !gem_mos_sr_test( m, SR_FLAG_CARRY ) );
+    sprintf(disasm, "BCC $%02X", offset&0xFF ); 
     return ticks;
 }
 
@@ -813,6 +1031,7 @@ gem_mos_tya_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     transfer(m, &m->y, &m->a );
+    sprintf(disasm, "TYA" );    
     return ticks;
 }
 
@@ -823,6 +1042,7 @@ gem_mos_ldy_imm ( gem_mos *m ) {
     m->y = immediate(m);
     gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->y) );
     gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->y) );  
+    sprintf(disasm, "LDY #$%02X", m->y);
     return ticks;
 }
 
@@ -833,6 +1053,7 @@ gem_mos_ldx_imm ( gem_mos *m ) {
     m->x = immediate(m);
     gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->x) );
     gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->x) );  
+    sprintf(disasm, "LDX #$%02X", m->x);
     return ticks;
 }
 
@@ -843,6 +1064,7 @@ gem_mos_lda_imm ( gem_mos *m ) {
     m->a = immediate(m);
     gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->a) );
     gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->a) );  
+    sprintf(disasm, "LDA #$%02X", m->a);
     return ticks;
 }
 
@@ -851,6 +1073,18 @@ gem_mos_tay_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     transfer(m, &m->a, &m->y );
+    sprintf(disasm, "TAY");
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_bcs_rel ( gem_mos *m ) {
+    GEM_OFFSET offset;
+    GEM_CLOCK_TICKS ticks;
+    ticks = 2;
+    offset = relative(m);
+    branch( m, offset, gem_mos_sr_test( m, SR_FLAG_CARRY ) );
+    sprintf(disasm, "BCS $%02X", offset&0xFF ); 
     return ticks;
 }
 
@@ -859,6 +1093,18 @@ gem_mos_clv_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     gem_mos_sr_unset( m, SR_FLAG_OVERFLOW );    
+    sprintf(disasm, "CLV");
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_cpy_imm ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_BYTE arg;
+    ticks = 2;
+    arg = immediate(m);
+    compare( m, m->y, arg );
+    sprintf( disasm, "CPY #$%02X", arg );
     return ticks;
 }
 
@@ -869,6 +1115,53 @@ gem_mos_iny_imp ( gem_mos *m ) {
     m->y++;
     gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->y) );
     gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->y) );  
+    sprintf(disasm, "INY");
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_cmp_imm ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_BYTE arg;
+    ticks = 2;
+    arg = immediate(m);
+    compare( m, m->a, arg );
+    sprintf( disasm, "CMP #$%02X", arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_dex_imp ( gem_mos *m ) { 
+    GEM_CLOCK_TICKS ticks;
+    ticks = 2;
+    m->x--;
+    gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->x) );
+    gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->x) );  
+    sprintf(disasm, "DEX");
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_cmp_abs ( gem_mos *m ) {
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    GEM_CLOCK_TICKS ticks;    
+    ticks = 4;    
+    addr = absolute(m);
+    arg = gem_mos_mem_read( m, addr );
+    compare( m, m->a, arg );
+    sprintf(disasm, "CMP $%04X ; 0x%02X", addr, arg);
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_bne_rel ( gem_mos *m ) {
+    GEM_OFFSET offset;
+    GEM_CLOCK_TICKS ticks;
+    ticks = 2;
+    offset = relative(m);
+    branch( m, offset, !gem_mos_sr_test( m, SR_FLAG_ZERO ) );
+    sprintf(disasm, "BNE $%02X", offset&0xFF ); 
     return ticks;
 }
 
@@ -877,6 +1170,18 @@ gem_mos_cld_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     gem_mos_sr_unset( m, SR_FLAG_DECIMAL ); 
+    sprintf(disasm, "CLD");
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_cpx_imm ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_BYTE arg;
+    ticks = 2;
+    arg = immediate(m);
+    compare( m, m->x, arg );
+    sprintf( disasm, "CPX #$%02X", arg );
     return ticks;
 }
 
@@ -887,6 +1192,7 @@ gem_mos_inx_imp ( gem_mos *m ) {
     m->x++;
     gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->x) );
     gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->x) );  
+    sprintf(disasm, "INX");
     return ticks;
 }
 
@@ -895,6 +1201,7 @@ gem_mos_sed_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     gem_mos_sr_set( m, SR_FLAG_DECIMAL );   
+    sprintf(disasm, "SED");
     return ticks;
 }
 
@@ -903,14 +1210,18 @@ gem_mos_txa_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     transfer(m, &m->x, &m->a );
+    sprintf(disasm, "TXA");
     return ticks;
 }
 
 GEM_CLOCK_TICKS
 gem_mos_sta_abs ( gem_mos *m ) {
+    GEM_MEMORY_ADDR arg;
     GEM_CLOCK_TICKS ticks;    
     ticks = 4;    
-    gem_mos_mem_write( m, absolute(m), m->a );    
+    arg = absolute(m);
+    gem_mos_mem_write( m, arg, m->a );    
+    sprintf(disasm, "STA $%04X", arg);
     return ticks;
 }
 
@@ -919,6 +1230,7 @@ gem_mos_txs_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     transfer(m, &m->x, &m->sp );
+    sprintf(disasm, "TXS");
     return ticks;
 }
 
@@ -927,6 +1239,18 @@ gem_mos_tax_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     transfer(m, &m->a, &m->x ); 
+    sprintf(disasm, "TAX");
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_lda_abs ( gem_mos *m ) {
+    GEM_MEMORY_ADDR arg;
+    GEM_CLOCK_TICKS ticks;
+    ticks = 4;
+    arg = absolute(m);
+    m->a = gem_mos_mem_read( m, arg );
+    sprintf( disasm, "LDA $%04X", arg );
     return ticks;
 }
 
@@ -935,16 +1259,7 @@ gem_mos_tsx_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     transfer(m, &m->sp, &m->x );    
-    return ticks;
-}
-
-GEM_CLOCK_TICKS
-gem_mos_dex_imp ( gem_mos *m ) {
-    GEM_CLOCK_TICKS ticks;
-    ticks = 2;
-    m->x--;
-    gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(m->x) );
-    gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(m->x) );  
+    sprintf(disasm, "TSX");
     return ticks;
 }
 
@@ -952,5 +1267,17 @@ GEM_CLOCK_TICKS
 gem_mos_nop_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;  
+    sprintf(disasm, "NOP");
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_beq_rel ( gem_mos *m ) {
+    GEM_OFFSET offset;
+    GEM_CLOCK_TICKS ticks;
+    ticks = 2;
+    offset = relative(m);
+    branch( m, offset, gem_mos_sr_test( m, SR_FLAG_ZERO ) );
+    sprintf(disasm, "BEQ $%02X", offset&0xFF ); 
     return ticks;
 }

@@ -48,7 +48,11 @@
  *---------------------------------------------------------------------------*/
 
 #define GEM_MEMORY_STACK    0x100   /* top of the stack */
-#define GEM_ROM_ADDR        0x600   /* where user programs are loaded */
+#define GEM_ROM_ADDR        0x400   /* where user programs are loaded */
+#define GEM_VECTOR_RESET    0xFFFC
+#define GEM_VECTOR_NMI      0xFFFA
+#define GEM_VECTOR_BRK      0xFFFE
+#define GEM_VECTOR_IRQ      0xFFFE
 #define GEM_MEMORY_CAPACITY 0x10000 /* the total capacity of MOS memory */
 
 /*---------------------------------------------------------------------------
@@ -66,6 +70,12 @@
 
 #define GEM_TEST_NEGATIVE(x) GEM_TEST_MSB(x) /* check msb to see if -ive */
 #define GEM_TEST_ZERO(x) ((x) == 0 )
+#define GEM_TEST_OVERFLOW( x, y, z ) \
+    ((GEM_TEST_NEGATIVE(x) && GEM_TEST_NEGATIVE(y) && !GEM_TEST_NEGATIVE(z))||\
+    (!GEM_TEST_NEGATIVE(x) && !GEM_TEST_NEGATIVE(y) && GEM_TEST_NEGATIVE(z)))
+#define GEM_TEST_CARRY( x, y, m ) ( (m) - (x) < (y) )
+
+#define GEM_REGISTER8_MAX ((1 << sizeof(GEM_REGISTER8) * CHAR_BIT) - 1)
 
 /*---------------------------------------------------------------------------
  *
@@ -78,11 +88,13 @@ typedef int      GEM_TEST;          /* a boolean for test pass/fail */
 typedef uint16_t GEM_MEMORY_ADDR;   /* address of a location in memory */
 typedef uint16_t GEM_MEMORY_WORD;   /* 16 bit value in memory */
 typedef uint8_t  GEM_MEMORY_BYTE;   /* 8 bit value in memory */
-typedef uint32_t GEM_CLOCK_TICKS;   /* processor clock type */
+typedef int8_t   GEM_MEMORY_SBYTE;  /* signed 8 bit value in memory */
+typedef int32_t  GEM_CLOCK_TICKS;   /* processor clock type */
 typedef uint8_t  GEM_OPCODE;        /* mos instruction opcode */
 typedef uint8_t  GEM_STATUS_FLAG;   /* status register flag bit */
 typedef uint8_t  GEM_REGISTER8;     /* 8-bit register type  */
 typedef uint16_t GEM_REGISTER16;    /* 16-bit register type */
+typedef int8_t   GEM_OFFSET;
 
 typedef struct gem_mos gem_mos;     /* forward declaration of the mos struct */
 
@@ -127,11 +139,6 @@ typedef GEM_CLOCK_TICKS (*gem_instruction)( gem_mos *m );
  *                value of the program counter may increase or decrease as
  *                dictated by the flow of the program
  *
- *                The clock keeps track of the number of cycles which have been
- *                run on the processor. Every instruction takes a varying 
- *                duration to execute. This is reflected in the clock. The
- *                clock only increases
- *
  *                Finally, memory is the 64 KB storage space used by the 
  *                processor. It can be divided into a number of regions 
  *                depending on how you want to use it. Accessing memory will
@@ -146,7 +153,6 @@ struct gem_mos {
     GEM_REGISTER8  sp;  /* stack pointer */
     GEM_REGISTER16 pc;  /* program counter */
 
-    GEM_CLOCK_TICKS  clock; /* number of cycles executed by the processor */
     GEM_MEMORY_BYTE memory[GEM_MEMORY_CAPACITY]; /* 64 KB memory for processor */
 };
 
@@ -157,30 +163,38 @@ struct gem_mos {
  *
  *---------------------------------------------------------------------------*/
 
-gem_mos*         gem_mos_new       ( void );
-void             gem_mos_init      ( gem_mos *m );
+gem_mos*         gem_mos_new         ( void );
+void             gem_mos_init        ( gem_mos *m );
 
-void             gem_mos_sr_set    ( gem_mos *m, GEM_STATUS_FLAG flag );
-void             gem_mos_sr_unset  ( gem_mos *m, GEM_STATUS_FLAG flag );
-GEM_TEST         gem_mos_sr_test   ( gem_mos *m, GEM_STATUS_FLAG flag );
-void             gem_mos_sr_update ( gem_mos *m, GEM_STATUS_FLAG flag, 
+void             gem_mos_sr_set      ( gem_mos *m, GEM_STATUS_FLAG flag );
+void             gem_mos_sr_unset    ( gem_mos *m, GEM_STATUS_FLAG flag );
+GEM_TEST         gem_mos_sr_test     ( gem_mos *m, GEM_STATUS_FLAG flag );
+void             gem_mos_sr_update   ( gem_mos *m, GEM_STATUS_FLAG flag, 
                                                     GEM_TEST test );
 
-GEM_MEMORY_WORD  gem_mos_mem_readw ( gem_mos *m, GEM_MEMORY_ADDR addr );
-GEM_MEMORY_BYTE  gem_mos_mem_read  ( gem_mos *m, GEM_MEMORY_ADDR addr );
-void             gem_mos_mem_write ( gem_mos *m, GEM_MEMORY_ADDR addr, 
-                                                    GEM_MEMORY_BYTE data );
+GEM_MEMORY_WORD  gem_mos_mem_readw   ( gem_mos *m, GEM_MEMORY_ADDR addr );
+GEM_MEMORY_BYTE  gem_mos_mem_read    ( gem_mos *m, GEM_MEMORY_ADDR addr );
+void             gem_mos_mem_write   ( gem_mos *m, GEM_MEMORY_ADDR addr, 
+                                                GEM_MEMORY_BYTE data );
 
-int32_t          gem_mos_load_rom  ( gem_mos *m, char *fname );
+int32_t          gem_mos_load_rom    ( gem_mos *m, char *fname );
+int32_t          gem_mos_load_rom_at ( gem_mos *m, char *fname, 
+                                                GEM_MEMORY_ADDR dest );
 
-GEM_MEMORY_BYTE  gem_mos_sp_pop    ( gem_mos *m );
-void             gem_mos_sp_push   ( gem_mos *m, GEM_MEMORY_BYTE data );
+GEM_MEMORY_BYTE  gem_mos_sp_pop      ( gem_mos *m );
+void             gem_mos_sp_push     ( gem_mos *m, GEM_MEMORY_BYTE data );
 
-GEM_OPCODE       gem_mos_fetch     ( gem_mos *m, GEM_MEMORY_ADDR );
-GEM_CLOCK_TICKS  gem_mos_execute   ( gem_mos *m, GEM_OPCODE code );
-void             gem_mos_step      ( gem_mos *m ); 
+GEM_OPCODE       gem_mos_fetch       ( gem_mos *m, GEM_MEMORY_ADDR );
+GEM_CLOCK_TICKS  gem_mos_execute     ( gem_mos *m, GEM_OPCODE code );
+GEM_CLOCK_TICKS  gem_mos_step        ( gem_mos *m ); 
+GEM_CLOCK_TICKS  gem_mos_run_for     ( gem_mos *m, 
+                                                GEM_CLOCK_TICKS num_cycles );
+void             gem_mos_reset_soft  ( gem_mos *m );
 
-void             gem_mos_free      ( gem_mos *m );
+GEM_OPCODE       gem_get_opcode      ( void );
+char*            gem_get_disasm      ( void );
+
+void             gem_mos_free        ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
  *
@@ -202,6 +216,7 @@ GEM_CLOCK_TICKS  gem_mos_asl_abs   ( gem_mos *m );
  *  opcode 0x10
  *
  *---------------------------------------------------------------------------*/
+GEM_CLOCK_TICKS  gem_mos_bpl_rel   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_clc_imp   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
@@ -216,6 +231,7 @@ GEM_CLOCK_TICKS  gem_mos_plp_imp   ( gem_mos *m );
  *  opcode 0x30
  *
  *---------------------------------------------------------------------------*/
+GEM_CLOCK_TICKS  gem_mos_bmi_rel   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_sec_imp   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
@@ -224,12 +240,15 @@ GEM_CLOCK_TICKS  gem_mos_sec_imp   ( gem_mos *m );
  *
  *---------------------------------------------------------------------------*/
 GEM_CLOCK_TICKS  gem_mos_pha_imp   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_eor_imm   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_jmp_abs   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
  *
  *  opcode 0x50
  *
  *---------------------------------------------------------------------------*/
+GEM_CLOCK_TICKS  gem_mos_bvc_rel   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_cli_imp   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
@@ -237,6 +256,7 @@ GEM_CLOCK_TICKS  gem_mos_cli_imp   ( gem_mos *m );
  *  opcode 0x60
  *
  *---------------------------------------------------------------------------*/
+GEM_CLOCK_TICKS  gem_mos_adc_imm   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_pla_imp   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
@@ -244,6 +264,7 @@ GEM_CLOCK_TICKS  gem_mos_pla_imp   ( gem_mos *m );
  *  opcode 0x70
  *
  *---------------------------------------------------------------------------*/
+GEM_CLOCK_TICKS  gem_mos_bvs_rel   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_sei_imp   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
@@ -260,6 +281,7 @@ GEM_CLOCK_TICKS  gem_mos_sta_abs   ( gem_mos *m );
  *  opcode 0x90
  *
  *---------------------------------------------------------------------------*/
+GEM_CLOCK_TICKS  gem_mos_bcc_rel   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_tya_imp   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_txs_imp   ( gem_mos *m );
 
@@ -273,12 +295,14 @@ GEM_CLOCK_TICKS  gem_mos_ldx_imm   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_lda_imm   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_tay_imp   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_tax_imp   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_lda_abs   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
  *
  *  opcode 0xB0
  *
  *---------------------------------------------------------------------------*/
+GEM_CLOCK_TICKS  gem_mos_bcs_rel   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_clv_imp   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_tsx_imp   ( gem_mos *m );
 
@@ -287,14 +311,18 @@ GEM_CLOCK_TICKS  gem_mos_tsx_imp   ( gem_mos *m );
  *  opcode 0xC0
  *
  *---------------------------------------------------------------------------*/
+GEM_CLOCK_TICKS  gem_mos_cpy_imm   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_iny_imp   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_cmp_imm   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_dex_imp   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_cmp_abs   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
  *
  *  opcode 0xD0
  *
  *---------------------------------------------------------------------------*/
+GEM_CLOCK_TICKS  gem_mos_bne_rel   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_cld_imp   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
@@ -302,6 +330,7 @@ GEM_CLOCK_TICKS  gem_mos_cld_imp   ( gem_mos *m );
  *  opcode 0xE0
  *
  *---------------------------------------------------------------------------*/
+GEM_CLOCK_TICKS  gem_mos_cpx_imm   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_inx_imp   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_nop_imp   ( gem_mos *m );
 
@@ -310,6 +339,7 @@ GEM_CLOCK_TICKS  gem_mos_nop_imp   ( gem_mos *m );
  *  opcode 0xF0
  *
  *---------------------------------------------------------------------------*/
+GEM_CLOCK_TICKS  gem_mos_beq_rel   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_sed_imp   ( gem_mos *m );
 
 #endif /* _GEM_MOS_H_ */

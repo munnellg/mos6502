@@ -1,8 +1,14 @@
 #include "gem.h"
 #include <SDL2/SDL.h>
+#include <ncurses.h>
 
 #define SCREEN_WIDTH  800
 #define SCREEN_HEIGHT 800
+
+#define PROCESSOR_SPEED     2*1024*1024
+#define SCREEN_REFRESH_RATE 60
+
+#define CYCLES_PER_REFRESH (PROCESSOR_SPEED/SCREEN_REFRESH_RATE)
 
 #define SCREEN_ADDR    0x200
 #define NUM_PIXELS     0x400
@@ -22,6 +28,21 @@ void print_mos( gem_mos *m ) {
 	printf("|---------------------|\n");
 	printf("|     PC: 0x%04X      |\n", m->pc);
 	printf("|---------------------|\n");
+}
+
+void
+print_ncurses( gem_mos *m ) {
+    move(0,0);
+    printw("|---------------------|\n");
+	printw("|       A: 0x%02X       |\n",  m->a);
+    printw("|---------------------|\n");
+	printw("|  X: 0x%02X |  Y: 0x%02X |\n", m->x, m->y);
+	printw("|---------------------|\n");
+	printw("| SR: 0x%02X | SP: 0x%02X |\n", m->sr, m->sp);
+	printw("|---------------------|\n");
+	printw("|     PC: 0x%04X      |\n", m->pc);
+	printw("|---------------------|\n");
+    printw("%s\n", gem_get_disasm()); 
 }
 
 int init() {
@@ -142,7 +163,6 @@ void pixel_code_to_color( GEM_MEMORY_BYTE pixel, uint8_t *r, uint8_t *g,
     default:
         *r = *g = *b = 0;
     }
-
 }
 
 void update_display( gem_mos *m ) {
@@ -180,29 +200,56 @@ void quit()
 	SDL_Quit();
 }
 
-int main( int argc, char *argv[] ) {
-	gem_mos mos;
-	int32_t rom_size = 0;
+void
+run_graphical( gem_mos *m ) {
+	uint32_t current_time;
+   	init();
+
+	while(!user_quit()) {
+        current_time = SDL_GetTicks();
+        gem_mos_run_for( m, CYCLES_PER_REFRESH );
+        update_display(m);
+        SDL_Delay( 1000/SCREEN_REFRESH_RATE - (SDL_GetTicks() - current_time));
+	}
 	
+	quit();
+}
+
+void
+run_headless( gem_mos *m ) {
+    char quit = '\0';
+
+    initscr();
+    while(quit!= 'q') {
+        if(gem_mos_step(m) < 0) {
+            printw("ERROR: OPCODE: 0x%02X\n", gem_get_opcode()); 
+            // printf("ERROR: OPCODE: 0x%02X\n", gem_get_opcode()); 
+            timeout(-1);
+            getch();
+            break;
+        }
+        // printf("%s\n", gem_get_disasm());
+        print_ncurses(m);
+        timeout(1);
+        quit = getch();
+    }
+    endwin();
+}
+
+int main( int argc, char *argv[] ) {
+	gem_mos  mos;
+
 	gem_mos_init(&mos);
 
 	if(argc < 2) {
 		return 1;
 	}
 
-	rom_size = gem_mos_load_rom( &mos, argv[1] );
-	
-	init();
+	gem_mos_load_rom_at( &mos, argv[1], 0 );
+    mos.pc = GEM_ROM_ADDR;
 
-	while(!user_quit()) {
-		if( (mos.pc - GEM_ROM_ADDR) < rom_size ) {
-			gem_mos_step( &mos );
-		}
-		update_display(&mos);
-	}
-	
-	quit();
-	
+    run_headless( &mos ); 
+		
     /* print the final processor state */
     print_mos( &mos );
 
