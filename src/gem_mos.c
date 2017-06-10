@@ -117,11 +117,11 @@ static gem_instruction jump_table [] = {
     NULL, /* 0x5F */
 
     gem_mos_rts_imp, /* 0x60 */
-    NULL, /* 0x61 */
+    gem_mos_adc_xin, /* 0x61 */
     NULL, /* 0x62 */
     NULL, /* 0x63 */
     NULL, /* 0x64 */
-    NULL, /* 0x65 */
+    gem_mos_adc_zpg, /* 0x65 */
     gem_mos_ror_zpg, /* 0x66 */
     NULL, /* 0x67 */
     gem_mos_pla_imp, /* 0x68 */
@@ -129,24 +129,24 @@ static gem_instruction jump_table [] = {
     gem_mos_ror_acc, /* 0x6A */
     NULL, /* 0x6B */
     gem_mos_jmp_ind, /* 0x6C */
-    NULL, /* 0x6D */
+    gem_mos_adc_abs, /* 0x6D */
     gem_mos_ror_abs, /* 0x6E */
     NULL, /* 0x6F */
 
     gem_mos_bvs_rel, /* 0x70 */
-    NULL, /* 0x71 */
+    gem_mos_adc_iny, /* 0x71 */
     NULL, /* 0x72 */
     NULL, /* 0x73 */
     NULL, /* 0x74 */
-    NULL, /* 0x75 */
+    gem_mos_adc_zpx, /* 0x75 */
     gem_mos_ror_zpx, /* 0x76 */
     NULL, /* 0x77 */
     gem_mos_sei_imp, /* 0x78 */
-    NULL, /* 0x79 */
+    gem_mos_adc_aby, /* 0x79 */
     NULL, /* 0x7A */
     NULL, /* 0x7B */
     NULL, /* 0x7C */
-    NULL, /* 0x7D */
+    gem_mos_adc_abx, /* 0x7D */
     gem_mos_ror_abx, /* 0x7E */
     NULL, /* 0x7F */
 
@@ -253,36 +253,36 @@ static gem_instruction jump_table [] = {
     NULL, /* 0xDF */
 
     gem_mos_cpx_imm, /* 0xE0 */
-    NULL, /* 0xE1 */
+    gem_mos_sbc_xin, /* 0xE1 */
     NULL, /* 0xE2 */
     NULL, /* 0xE3 */
     gem_mos_cpx_zpg, /* 0xE4 */
-    NULL, /* 0xE5 */
+    gem_mos_sbc_zpg, /* 0xE5 */
     gem_mos_inc_zpg, /* 0xE6 */
     NULL, /* 0xE7 */
     gem_mos_inx_imp, /* 0xE8 */
-    NULL, /* 0xE9 */
+    gem_mos_sbc_imm, /* 0xE9 */
     gem_mos_nop_imp, /* 0xEA */
     NULL, /* 0xEB */
     gem_mos_cpx_abs, /* 0xEC */
-    NULL, /* 0xED */
+    gem_mos_sbc_abs, /* 0xED */
     gem_mos_inc_abs, /* 0xEE */
     NULL, /* 0xEF */
 
     gem_mos_beq_rel, /* 0xF0 */
-    NULL, /* 0xF1 */
+    gem_mos_sbc_iny, /* 0xF1 */
     NULL, /* 0xF2 */
     NULL, /* 0xF3 */
     NULL, /* 0xF4 */
-    NULL, /* 0xF5 */
+    gem_mos_sbc_zpx, /* 0xF5 */
     gem_mos_inc_zpx, /* 0xF6 */
     NULL, /* 0xF7 */
     gem_mos_sed_imp, /* 0xF8 */
-    NULL, /* 0xF9 */
+    gem_mos_sbc_aby, /* 0xF9 */
     NULL, /* 0xFA */
     NULL, /* 0xFB */
     NULL, /* 0xFC */
-    NULL, /* 0xFD */
+    gem_mos_sbc_abx, /* 0xFD */
     gem_mos_inc_abx, /* 0xFE */
     NULL, /* 0xFF */
 };
@@ -513,16 +513,16 @@ relative ( gem_mos *m ) {
 }
 
 static void
-add_with_carry ( gem_mos *m, GEM_REGISTER8 *b ) {
+add_with_carry ( gem_mos *m, GEM_REGISTER8 b ) {
     GEM_REGISTER8 x;
     /* compute result */
-    x = m->a + *b + gem_mos_sr_test( m, SR_FLAG_CARRY );
+    x = m->a + b + gem_mos_sr_test( m, SR_FLAG_CARRY );
     /* update status registers */
     gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(x) );
     gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(x) );  
-    gem_mos_sr_update( m, SR_FLAG_OVERFLOW, GEM_TEST_OVERFLOW( m->a, *b, x ) );
-    gem_mos_sr_update( m, SR_FLAG_CARRY, GEM_TEST_CARRY( m->a, *b, 
-                GEM_REGISTER8_MAX) );  
+    gem_mos_sr_update( m, SR_FLAG_OVERFLOW, GEM_TEST_OVERFLOW( m->a, b, x ) );
+    gem_mos_sr_update( m, SR_FLAG_CARRY, GEM_TEST_CARRY( m->a, b, 
+                GEM_REGISTER8_MAX - gem_mos_sr_test( m, SR_FLAG_CARRY)) );  
     /* move result to accumulator */
     m->a = x;
 }
@@ -559,7 +559,7 @@ branch ( gem_mos *m, GEM_OFFSET o, GEM_TEST condition ) {
 static void
 compare ( gem_mos *m, GEM_MEMORY_BYTE x, GEM_MEMORY_BYTE y ) {
     GEM_MEMORY_BYTE result;
-    result = x + (~y+1);
+    result = x + (~y + 1);
     gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(result) );                    
     gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(result) );
     gem_mos_sr_update( m, SR_FLAG_CARRY, x >= y ); 
@@ -626,6 +626,11 @@ rotate_right ( gem_mos *m, GEM_REGISTER8 *a ) {
     *a |= (tmp << ((sizeof(GEM_REGISTER8) * CHAR_BIT)-1));
     gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(*a) );
     gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(*a) );
+}
+
+static void
+subtract_with_carry ( gem_mos *m, GEM_REGISTER8 b ) {
+    add_with_carry( m, ~b );    
 }
 
 static void
@@ -1502,6 +1507,32 @@ gem_mos_rts_imp ( gem_mos *m ) {
 }
 
 GEM_CLOCK_TICKS
+gem_mos_adc_xin ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = indirect_x( m );
+    arg = gem_mos_mem_read( m, addr );
+    add_with_carry( m, arg );
+    sprintf( disasm, "ADC ($%02X, X) ; 0x%02X", addr, arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_adc_zpg ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = zeropage( m );
+    arg = gem_mos_mem_read( m, addr );
+    add_with_carry( m, arg );
+    sprintf( disasm, "ADC $%02X ; 0x%02X", addr, arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
 gem_mos_ror_zpg ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     GEM_MEMORY_ADDR addr;
@@ -1532,7 +1563,7 @@ gem_mos_adc_imm ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;
     arg = immediate(m);
-    add_with_carry( m, &arg );
+    add_with_carry( m, arg );
     sprintf(disasm, "ADC #$%02X", arg);
     return ticks;
 }
@@ -1554,6 +1585,19 @@ gem_mos_jmp_ind ( gem_mos *m ) {
     arg = indirect(m);
     jump( m, arg );
     sprintf(disasm, "JMP ($%04X)", arg);
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_adc_abs ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = absolute( m );
+    arg = gem_mos_mem_read( m, addr );
+    add_with_carry( m, arg );
+    sprintf( disasm, "ADC $%04X ; 0x%02X", addr, arg );
     return ticks;
 }
 
@@ -1583,6 +1627,32 @@ gem_mos_bvs_rel ( gem_mos *m ) {
 }
 
 GEM_CLOCK_TICKS
+gem_mos_adc_iny ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = indirect_y( m );
+    arg = gem_mos_mem_read( m, addr );
+    add_with_carry( m, arg );
+    sprintf( disasm, "ADC ($%02X), Y ; 0x%02X", addr, arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_adc_zpx ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = zeropage_x( m );
+    arg = gem_mos_mem_read( m, addr );
+    add_with_carry( m, arg );
+    sprintf( disasm, "ADC $%02X, X ; 0x%02X", addr, arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
 gem_mos_ror_zpx ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     GEM_MEMORY_ADDR addr;
@@ -1602,6 +1672,32 @@ gem_mos_sei_imp ( gem_mos *m ) {
     ticks = 2;
     gem_mos_sr_set( m, SR_FLAG_INTERRUPT ); 
     sprintf(disasm, "SEI" );    
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_adc_aby ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = absolute_y( m );
+    arg = gem_mos_mem_read( m, addr );
+    add_with_carry( m, arg );
+    sprintf( disasm, "ADC $%04X, Y ; 0x%02X", addr, arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_adc_abx ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = absolute_x( m );
+    arg = gem_mos_mem_read( m, addr );
+    add_with_carry( m, arg );
+    sprintf( disasm, "ADC $%04X, X ; 0x%02X", addr, arg );
     return ticks;
 }
 
@@ -2303,6 +2399,32 @@ gem_mos_cpx_imm ( gem_mos *m ) {
 }
 
 GEM_CLOCK_TICKS
+gem_mos_sbc_xin ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = indirect_x( m );
+    arg = gem_mos_mem_read( m, addr );
+    subtract_with_carry( m, arg );
+    sprintf( disasm, "SBC ($%02X, X) ; 0x%02X", addr, arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_sbc_zpg ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = zeropage( m );
+    arg = gem_mos_mem_read( m, addr );
+    subtract_with_carry( m, arg );
+    sprintf( disasm, "SBC $%02X ; 0x%02X", addr, arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
 gem_mos_cpx_zpg ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     GEM_MEMORY_ADDR addr;
@@ -2339,6 +2461,17 @@ gem_mos_inx_imp ( gem_mos *m ) {
 }
 
 GEM_CLOCK_TICKS
+gem_mos_sbc_imm ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    arg = immediate(m);
+    subtract_with_carry( m, arg );
+    sprintf( disasm, "SBC #$%02X", arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
 gem_mos_nop_imp ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     ticks = 2;  
@@ -2356,6 +2489,19 @@ gem_mos_cpx_abs ( gem_mos *m ) {
     arg = gem_mos_mem_read( m, addr );
     compare( m, m->x, arg );
     sprintf( disasm, "CPX $%04X ; 0x%02X", addr, arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_sbc_abs ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = absolute( m );
+    arg = gem_mos_mem_read( m, addr );
+    subtract_with_carry( m, arg );
+    sprintf( disasm, "SBC $%04X ; 0x%02X", addr, arg );
     return ticks;
 }
 
@@ -2385,6 +2531,32 @@ gem_mos_beq_rel ( gem_mos *m ) {
 }
 
 GEM_CLOCK_TICKS
+gem_mos_sbc_iny ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = indirect_y( m );
+    arg = gem_mos_mem_read( m, addr );
+    subtract_with_carry( m, arg );
+    sprintf( disasm, "SBC ($%02X), Y ; 0x%02X", addr, arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_sbc_zpx ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = zeropage_x( m );
+    arg = gem_mos_mem_read( m, addr );
+    subtract_with_carry( m, arg );
+    sprintf( disasm, "SBC $%02X, X ; 0x%02X", addr, arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
 gem_mos_inc_zpx ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     GEM_MEMORY_ADDR addr;
@@ -2404,6 +2576,32 @@ gem_mos_sed_imp ( gem_mos *m ) {
     ticks = 2;
     gem_mos_sr_set( m, SR_FLAG_DECIMAL );   
     sprintf(disasm, "SED");
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_sbc_aby ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = absolute_y( m );
+    arg = gem_mos_mem_read( m, addr );
+    subtract_with_carry( m, arg );
+    sprintf( disasm, "SBC $%04X, Y ; 0x%02X", addr, arg );
+    return ticks;
+}
+
+GEM_CLOCK_TICKS
+gem_mos_sbc_abx ( gem_mos *m ) {
+    GEM_CLOCK_TICKS ticks;
+    GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
+    ticks = 4;
+    addr = absolute_x( m );
+    arg = gem_mos_mem_read( m, addr );
+    subtract_with_carry( m, arg );
+    sprintf( disasm, "SBC $%04X, X ; 0x%02X", addr, arg );
     return ticks;
 }
 

@@ -299,11 +299,14 @@ GEM_CLOCK_TICKS  gem_mos_lsr_abx   ( gem_mos *m );
  *
  *---------------------------------------------------------------------------*/
 GEM_CLOCK_TICKS  gem_mos_rts_imp   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_adc_xin   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_adc_zpg   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_ror_zpg   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_pla_imp   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_adc_imm   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_ror_acc   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_jmp_ind   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_adc_abs   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_ror_abs   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
@@ -312,8 +315,12 @@ GEM_CLOCK_TICKS  gem_mos_ror_abs   ( gem_mos *m );
  *
  *---------------------------------------------------------------------------*/
 GEM_CLOCK_TICKS  gem_mos_bvs_rel   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_adc_iny   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_adc_zpx   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_ror_zpx   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_sei_imp   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_adc_aby   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_adc_abx   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_ror_abx   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
@@ -418,11 +425,15 @@ GEM_CLOCK_TICKS  gem_mos_dec_abx   ( gem_mos *m );
  *
  *---------------------------------------------------------------------------*/
 GEM_CLOCK_TICKS  gem_mos_cpx_imm   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_sbc_xin   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_cpx_zpg   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_sbc_zpg   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_inc_zpg   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_inx_imp   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_sbc_imm   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_nop_imp   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_cpx_abs   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_sbc_abs   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_inc_abs   ( gem_mos *m );
 
 /*---------------------------------------------------------------------------
@@ -431,8 +442,12 @@ GEM_CLOCK_TICKS  gem_mos_inc_abs   ( gem_mos *m );
  *
  *---------------------------------------------------------------------------*/
 GEM_CLOCK_TICKS  gem_mos_beq_rel   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_sbc_iny   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_sbc_zpx   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_inc_zpx   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_sed_imp   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_sbc_aby   ( gem_mos *m );
+GEM_CLOCK_TICKS  gem_mos_sbc_abx   ( gem_mos *m );
 GEM_CLOCK_TICKS  gem_mos_inc_abx   ( gem_mos *m );
 
 #endif /* _GEM_MOS_H_ */
