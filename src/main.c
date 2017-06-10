@@ -32,6 +32,7 @@ void print_mos( gem_mos *m ) {
 
 void
 print_ncurses( gem_mos *m ) {
+    clrtobot();
     move(0,0);
     printw("|---------------------|\n");
 	printw("|       A: 0x%02X       |\n",  m->a);
@@ -42,6 +43,9 @@ print_ncurses( gem_mos *m ) {
 	printw("|---------------------|\n");
 	printw("|     PC: 0x%04X      |\n", m->pc);
 	printw("|---------------------|\n");
+    //for(int i=0xFF; i>m->sp; i--) {
+    //     printw("0x%04X 0x%02X\n", GEM_MEMORY_STACK+i, m->memory[GEM_MEMORY_STACK+i]);
+    //}
     printw("%s\n", gem_get_disasm()); 
 }
 
@@ -220,6 +224,7 @@ run_headless( gem_mos *m ) {
     char quit = '\0';
 
     initscr();
+    scrollok(stdscr,TRUE);
     while(quit!= 'q') {
         if(gem_mos_step(m) < 0) {
             printw("ERROR: OPCODE: 0x%02X\n", gem_get_opcode()); 
@@ -229,8 +234,13 @@ run_headless( gem_mos *m ) {
             break;
         }
         // printf("%s\n", gem_get_disasm());
+        refresh();
         print_ncurses(m);
-        timeout(1);
+        //if( m->pc > 0x0e6d && m->pc <= 0x0e85 ) {
+        //   timeout(-1);
+        //} else {
+            timeout(0);
+        //} 
         quit = getch();
     }
     endwin();
@@ -246,6 +256,7 @@ int main( int argc, char *argv[] ) {
 	}
 
 	gem_mos_load_rom_at( &mos, argv[1], 0 );
+    //gem_mos_reset_soft(&mos);
     mos.pc = GEM_ROM_ADDR;
 
     run_headless( &mos ); 
