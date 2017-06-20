@@ -72,8 +72,8 @@
 /* get least significant bit of a value */
 #define GEM_TEST_LSB(x) ( ((x) & 0x01) ) 
 
-#define GEM_TEST_NEGATIVE(x) GEM_TEST_MSB(x) /* check msb to see if -ive */
-#define GEM_TEST_ZERO(x) ((x) == 0 )
+#define GEM_TEST_NEGATIVE(x) (((x) & 0x80) != 0) /* check msb to see if -ive */
+#define GEM_TEST_ZERO(x) ((x & 0xFF) == 0 )
 #define GEM_TEST_OVERFLOW( x, y, z ) \
     ((GEM_TEST_NEGATIVE(x) && GEM_TEST_NEGATIVE(y) && !GEM_TEST_NEGATIVE(z))||\
     (!GEM_TEST_NEGATIVE(x) && !GEM_TEST_NEGATIVE(y) && GEM_TEST_NEGATIVE(z)))
@@ -83,6 +83,9 @@
 
 #define GEM_GET_HBYTE(x) (((x)>>8)&0xFF)
 #define GEM_GET_LBYTE(x) ((x)&0xFF)
+
+#define GEM_GET_HNIBBLE(x) (((x)>>4)&0xF)
+#define GEM_GET_LNIBBLE(x) ((x)&0xF)
 
 /*---------------------------------------------------------------------------
  *

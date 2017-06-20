@@ -236,7 +236,7 @@ run_headless( gem_mos *m ) {
         // printf("%s\n", gem_get_disasm());
         refresh();
         print_ncurses(m);
-        //if( m->pc == 0x45C0 ) {
+        //if( m->pc > 0x339f ) {
         //    printw("0x%02X", m->memory[0x0210]);
         //   timeout(-1);
         //} else {
@@ -257,9 +257,8 @@ int main( int argc, char *argv[] ) {
 	}
 
 	gem_mos_load_rom_at( &mos, argv[1], 0 );
-    gem_mos_reset_soft(&mos);
-    //mos.pc = GEM_ROM_ADDR;
-    mos.pc = 0x32f4;
+    mos.pc = GEM_ROM_ADDR;
+//    mos.pc = 0x32f4;
     // gem_mos_load_rom_at( &mos, argv[1], 0x4000);
     // mos.pc = 0xf000;
     // mos.memory[0xFFFE] = 0xA4;

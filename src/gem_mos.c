@@ -514,15 +514,37 @@ relative ( gem_mos *m ) {
 
 static void
 add_with_carry ( gem_mos *m, GEM_REGISTER8 b ) {
-    GEM_REGISTER8 x;
+    GEM_REGISTER16 x;
+    GEM_REGISTER8 bcd_lo;
+
     /* compute result */
     x = m->a + b + gem_mos_sr_test( m, SR_FLAG_CARRY );
-    /* update status registers */
     gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(x) );
-    gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(x) );  
-    gem_mos_sr_update( m, SR_FLAG_OVERFLOW, GEM_TEST_OVERFLOW( m->a, b, x ) );
-    gem_mos_sr_update( m, SR_FLAG_CARRY, GEM_TEST_CARRY( m->a, b, 
-                GEM_REGISTER8_MAX - gem_mos_sr_test( m, SR_FLAG_CARRY)) );  
+
+    if( gem_mos_sr_test( m, SR_FLAG_DECIMAL ) ) {
+        bcd_lo = GEM_GET_LNIBBLE( m->a ) + GEM_GET_LNIBBLE( b ) 
+            + gem_mos_sr_test( m, SR_FLAG_CARRY );
+        
+        gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(x) );  
+        gem_mos_sr_update( m, SR_FLAG_OVERFLOW, GEM_TEST_OVERFLOW( m->a, b, x ) );
+        
+        if( bcd_lo > 0x09 ) {
+            x += 0x06;
+        }
+        
+        if( x > 0x99 ) {
+            x += 0x60;
+        }
+        
+        gem_mos_sr_update( m, SR_FLAG_CARRY, x > 0x99 );   
+        
+    } else {
+        gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(x) );  
+        gem_mos_sr_update( m, SR_FLAG_OVERFLOW, GEM_TEST_OVERFLOW( m->a, b, x ) );
+        gem_mos_sr_update( m, SR_FLAG_CARRY, GEM_TEST_CARRY( m->a, b,
+                   GEM_REGISTER8_MAX - gem_mos_sr_test( m, SR_FLAG_CARRY)) );   
+    }
+
     /* move result to accumulator */
     m->a = x;
 }
@@ -563,7 +585,7 @@ compare ( gem_mos *m, GEM_MEMORY_BYTE x, GEM_MEMORY_BYTE y ) {
     gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(result) );                    
     gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(result) );
     gem_mos_sr_update( m, SR_FLAG_CARRY, x >= y ); 
-            // GEM_TEST_CARRY( comp, 1, GEM_REGISTER8_MAX) ); 
+            //GEM_TEST_CARRY( comp, 1, GEM_REGISTER8_MAX) );  
 }
 
 static void
@@ -630,7 +652,28 @@ rotate_right ( gem_mos *m, GEM_REGISTER8 *a ) {
 
 static void
 subtract_with_carry ( gem_mos *m, GEM_REGISTER8 b ) {
-    add_with_carry( m, ~b );    
+    GEM_REGISTER16 x;
+
+    x = m->a - b - ( 1 - gem_mos_sr_test( m, SR_FLAG_CARRY )) ;
+
+    gem_mos_sr_update( m, SR_FLAG_ZERO, GEM_TEST_ZERO(x) );
+    gem_mos_sr_update( m, SR_FLAG_NEGATIVE, GEM_TEST_NEGATIVE(x) );   
+    gem_mos_sr_update( m, SR_FLAG_OVERFLOW, 
+            GEM_TEST_NEGATIVE( (m->a ^ x) ) && GEM_TEST_NEGATIVE( m->a ^ b ) );
+
+    if( gem_mos_sr_test( m, SR_FLAG_DECIMAL ) ) {
+        if( GEM_GET_LNIBBLE( m->a ) - ( 1 - gem_mos_sr_test(m, SR_FLAG_CARRY))
+               < GEM_GET_LNIBBLE(b) ) {
+            x -= 0x06;
+        }
+        if( x > 0x99 ) {
+            x -= 0x60;
+        } 
+    }
+
+    gem_mos_sr_update( m, SR_FLAG_CARRY, x < 0x100 );   
+
+    m->a = x;
 }
 
 static void
@@ -767,10 +810,6 @@ gem_mos_fetch ( gem_mos *m, GEM_MEMORY_ADDR addr ) {
 /* execute opcode and return the number of cpu cycles required for execution */
 GEM_CLOCK_TICKS
 gem_mos_execute ( gem_mos *m, GEM_OPCODE code ) {
-    /* TODO: Fail gracefully for invalid opcode. Right now I feel it is the
-     * responsibility of the developer to make sure invalid code isn't run,
-     * but maybe the library should do something to prevent catastropic 
-     * failure */
     if( jump_table[code] ) {
         return jump_table[code](m); 
     } else {
@@ -1951,10 +1990,12 @@ GEM_CLOCK_TICKS
 gem_mos_lda_zpg ( gem_mos *m ) {
     GEM_CLOCK_TICKS ticks;
     GEM_MEMORY_ADDR addr;
+    GEM_MEMORY_BYTE arg;
     ticks = 3;
     addr = zeropage(m);
-    transfer(m, &m->a, gem_mos_mem_read(m, addr), SR_UPDATE );
-    sprintf(disasm, "LDX $%02X", addr);
+    arg = gem_mos_mem_read( m, addr );
+    transfer(m, &m->a, arg, SR_UPDATE );
+    sprintf(disasm, "LDA $%02X ; 0x%02X", addr, arg);
     return ticks;
 }
 
